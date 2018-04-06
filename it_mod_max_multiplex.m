@@ -1,4 +1,4 @@
-% Iterative modularity maximisation algorithm for temporal networks
+% Iterative modularity maximisation algorithm for multiplex networks
 % which updates estimates of gamma and omega until convergence.
 %
 % Inputs:
@@ -18,15 +18,13 @@
 %     smaller communities being detected
 %   - uniform: set to 1 if the parameters are uniform across layers, and to
 %     0 otherwise; default value uniform = 1
-%   - algtype: set to one of 'st' (standard GenLouvain), 'it' (iterated
+%   - algtype: set to one of '' (standard GenLouvain), 'it' (iterated
 %     GenLouvain), or 'itPP' (iterated GenLouvain with post-processing);
 %     default value algtype = 'itPP'
 %   - movetype: set to one of 'move', 'moverand', or 'moverandw' (see
 %     GenLouvain options); default value movetype = 'moverandw'
 %   - drawflag: set to 1 to show a drip plot of the multilayer community
 %     structure at each step of the iteration; default value drawflag = 0
-%   - networktype: one of 'undirected' (default), 'directed', or 'bipartite'
-%     (which implicitly assumes undirected edges)
 %
 % Outputs:
 %   - gamma, omega, beta: parameter estimates at convergence, or parameter
@@ -43,19 +41,20 @@
 %   - by default, convergence tolerance is 1e-2 for gamma and 5e-2 for
 %     omega; the larger tolerance for the latter is justified by the fact 
 %     that modularity maximisation is less sensitive to the choice of omega
-%   - max_iter is the maximum number of iterations, set to 20 by default
+%   - max_iter is the maximum number of iterations, set to 8 by default
 %   - when the algorithm fails to converge in max_iter iterations, it 
 %     returns the multilayer partition S with the highest value of the 
 %     normalised modularity Q
 % 
 % Dependencies:
-%   - genlouvain.m and iterated_genlouvain.m, which should be in the Matlab path
+%   - genlouvain.m and iterated_genlouvain.m, which need to be in a 
+%     directory "../GenLouvain2.1" (change if necessary)
 %   - estimate_SBM_parameters.m, optimal_gamma.m, optimal_omega.m,
 %     optimal_beta.m, which need to be in the same directory as this file
 %
 function [gamma, omega, beta, S, Q, converged] = ...
-  it_mod_max_temporal(A, gamma0, omega0, beta0, K_max, ...
-  uniform, algtype, movetype, drawflag, networktype)
+  it_mod_max_multiplex(A, gamma0, omega0, beta0, K_max, ...
+  uniform, algtype, movetype, drawflag)
 
   % Set parameter defaults
   if nargin < 4 || isempty(beta0)
@@ -76,17 +75,11 @@ function [gamma, omega, beta, S, Q, converged] = ...
   if nargin < 9 || isempty(drawflag)
     drawflag = 0;
   end
-  if nargin < 10 || isempty(networktype)
-    networktype = 'undirected';
-  end
 
   % Process inputs
   T = length(A);  % number of layers
   N = length(A{1});  % number of nodes in each layer
-  if strcmp(networktype, 'bipartite')
-    N = sum(size(A{1}));
-  end
-  PP = @(S) postprocess_ordinal_multilayer(S, T);  % post-processing function
+  PP = @(S) postprocess_categorical_multilayer(S, T);  % post-processing function
 
   gamma = gamma0; omega = omega0; beta = beta0;
   
@@ -106,17 +99,8 @@ function [gamma, omega, beta, S, Q, converged] = ...
       iter = iter + 1;
       
       % Run multilayer modularity with current values of omega and gamma
-      
-      % Construct modularity matrix B
-      if strcmp(networktype, 'undirected')
-        [B, twom] = multiord(A, gamma, omega);  
-      elseif strcmp(networktype, 'directed')
-        [B, twom] = multiorddir_f(A, gamma, omega);
-      elseif strcmp(networktype, 'bipartite')
-        [B, twom] = multiordbipartite(A, gamma, omega);
-      end
-      
-      % Run GenLouvain algorithm
+      %[B, twom] = multicat(A, gamma, omega);  % categorical interlayer coupling
+      [B, twom] = multicatdir_f(A, gamma, omega);  % categorical interlayer coupling
       if strcmp(algtype, 'st')
         [S, Q] = genlouvain(B, [], 0, 1, movetype);
       elseif strcmp(algtype, 'it')
@@ -148,7 +132,8 @@ function [gamma, omega, beta, S, Q, converged] = ...
       end
       
       % Use output to estimate th_in, th_out, p, K
-      [th_in, th_out, p, K] = estimate_SBM_parameters(A, S);
+      [th_in, th_out, p, K] = ...
+        estimate_SBM_parameters(A, S, 1, [], 'multiplex');
 
       % Re-estimate gamma and omega
       if K == 1
@@ -162,7 +147,8 @@ function [gamma, omega, beta, S, Q, converged] = ...
         %omega_new = omega * 1.1;
       else
         gamma_new = optimal_gamma(th_in, th_out, gamma);
-        omega_new = optimal_omega(p, K, th_in, th_out, omega);
+        % Different scaling for multiplex networks compared to temporal networks
+        omega_new = optimal_omega(p, K, th_in, th_out, omega) * 2 / T;
       end
 
       % Display outputs
@@ -189,90 +175,6 @@ function [gamma, omega, beta, S, Q, converged] = ...
       
     fprintf('\n')
   else  % layer-dependent parameters 
-    % Create vectors of appropriate length if scalars are given
-    if length(gamma) == 1
-      gamma = repmat(gamma, T, 1);
-    end
-    if length(omega) == 1
-      omega = repmat(omega, T - 1, 1);
-    end
-    if length(beta) == 1
-      beta = repmat(beta, T, 1);
-    end
-    
-    Q_best = 0;
-    
-    while ~converged && iter < max_iter
-      iter = iter + 1;
-
-      % Run multilayer modularity with current values of omega and gamma
-      [B, twom] = multiordgen(A, gamma, omega, beta); 
-      if strcmp(algtype, 'st')
-        [S, Q] = genlouvain(B, [], 0, 1, movetype);
-      elseif strcmp(algtype, 'it')
-        [S, Q, ~] = iterated_genlouvain(B, [], [], 1, movetype);
-      elseif strcmp(algtype, 'itPP')
-        [S, Q, ~] = iterated_genlouvain(B, [], [], 1, movetype, [], PP);
-      end
-      
-      % Reshape S and normalise Q
-      S = reshape(S, N, T);
-      Q = Q / twom;
-      
-      % Save run if best so far
-      if Q > Q_best
-        Q_best = Q; 
-        S_best = S;
-        gamma_best = gamma;
-        omega_best = omega;
-        beta_best = beta;
-      end
-      
-      % Show visualisation of multilayer partition
-      if drawflag
-        drip_plot(S); 
-        title(strcat('$\langle\gamma\rangle$=', num2str(mean(gamma), '%.2f'), ...
-          ', $\langle\omega\rangle=$', num2str(mean(omega), '%.2f'), ...
-          ', $Q=$', num2str(Q, '%.2f')), ...
-          'Interpreter', 'LaTeX');
-        drawnow
-      end
-      
-      % Use output to estimate th_in, th_out, p, K
-      [th_in, th_out, p, K] = estimate_SBM_parameters(A, S, 0);
-      
-      % Re-estimate gamma, omega, beta
-      gamma_new = optimal_gamma(th_in, th_out, gamma, 0);
-      omega_new = optimal_omega(p, K, th_in, th_out, omega, 0);
-      beta_new = optimal_beta(th_in, th_out);
-      
-      % Display average parameter values and maximum change
-      fprintf('Iteration %d average values: gamma = %.2f, omega = %.2f, p = %.2f, K = %.1f\n', ...
-        iter, mean(gamma_new), mean(omega_new), mean(p), mean(K));
-      fprintf('..max change: delta(gamma) = %.2f, delta(omega) = %.2f, delta(beta) = %.2f\n', ...
-        max(abs(gamma_new - gamma)), max(abs(omega_new - omega)), max(abs(beta_new - beta)));
-      %fprintf('Gamma:'); gamma_new
-      %fprintf('Omega:'); omega_new
-      %fprintf('Beta:'); beta_new
-      
-      % Check for convergence
-      if max(max(max(abs(gamma_new ./ gamma - 1)), ...
-          max(abs(omega_new ./ omega - 1)) / 5), ...
-          max(abs(beta_new ./ beta - 1)) / 1) < tol
-        converged = 1;
-      end
-
-      gamma = gamma_new; omega = omega_new; beta = beta_new;
-    end
-    
-    % Save highest-modularity results if iteration did not converge
-    if ~converged
-      S = S_best;
-      Q = Q_best;
-      gamma = gamma_best;
-      omega = omega_best;
-    end
-      
-    fprintf('\n');
+    error('Layer-dependent parameter optimisation is not yet implemented!');
   end
 end

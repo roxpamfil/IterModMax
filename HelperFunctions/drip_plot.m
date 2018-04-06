@@ -11,5 +11,5 @@ function [] = drip_plot(S)
   set(gca, 'TickLabelInterpreter', 'LaTeX', 'FontSize', 20);
   xlabel('Layers', 'Interpreter', 'LaTeX');
   ylabel('Nodes', 'Interpreter', 'LaTeX');
-  %xticks(1:size(S, 2));
+  xticks(1:size(S, 2));
 end

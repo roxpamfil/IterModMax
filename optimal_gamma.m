@@ -13,8 +13,11 @@ function [gamma] = optimal_gamma(th_in, th_out, gamma_old, uniform)
       
   if nargin < 4 || uniform
     gamma = (th_in - th_out) / (log(th_in) - log(th_out));
+    if th_out == 0
+      gamma = th_in / log(th_in);
+    end
 
-    if isnan(th_out) || th_out == 0  || isnan(gamma)
+    if isnan(th_out) || isnan(gamma)
       % Perturbate by (-10%, +10%)
       gamma = gamma_old * (1 + 0.2 * rand() - 0.1);
     end

@@ -19,7 +19,10 @@ function [omega] = optimal_omega(p, K, th_in, th_out, omega_old, uniform)
   if nargin < 6 || uniform
     % Compute a single omega
     omega = log(1 + K * p / (1 - p)) / (2 * (log(th_in) - log(th_out)));
-    omega = min(omega, omega_max);
+    if th_out == 0
+      omega = log(1 + K * p / (1 - p)) / (2 * (log(th_in)));
+    end
+    omega = max(min(omega, omega_max), 0);
     
     if isnan(omega)
       % Perturbate by (-10%, +10%)
