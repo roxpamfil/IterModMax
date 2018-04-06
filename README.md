@@ -1,4 +1,4 @@
-# OptModMax version 1.0
+# IterModMax version 1.0
 
 This code determines "optimal" resolution and interlayer coupling parameters for multilayer modularity maximisation.
 
