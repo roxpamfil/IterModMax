@@ -19,8 +19,8 @@ end
 fclose(fileID);
 
 %% Run multiplex optimisation
-gamma0 = 1.5; omega0 = 1 / T;
+gamma0 = 1.5; omega0 = 1;
 K_max_alg = 20;
 [gamma, omega, ~, S, Q, converged] = it_mod_max_multiplex(A, ...
-  gamma0, omega0, [], K_max_alg, 1, '', '', 0);
+  gamma0, omega0, [], K_max_alg, 1, '', '', 0, 'directed');
 drip_plot(S);
