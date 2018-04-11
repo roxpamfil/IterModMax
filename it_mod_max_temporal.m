@@ -31,11 +31,13 @@
 % Outputs:
 %   - gamma, omega, beta: parameter estimates at convergence, or parameter
 %     values yielding the highest-modularity partition if iteration did not
-%     converge
+%     converge (after discarding first burn_in iterations, see below)
 %   - S: multilayer community structure at convergence, or
 %     highest-modularity community structure if iteration did not converge
+%     (after discarding first burn_in iterations, see below)
 %   - Q: modularity value at convergence, or highest modularity encountered
-%     if iteration did not converge
+%     if iteration did not converge (after discarding first burn_in
+%     iterations, see below)
 %   - converged: binary flag, equal to 1 if iteration converged to
 %     prescribed tolerance
 %
@@ -44,14 +46,17 @@
 %     omega; the larger tolerance for the latter is justified by the fact 
 %     that modularity maximisation is less sensitive to the choice of omega
 %   - max_iter is the maximum number of iterations, set to 20 by default
-%   - when the algorithm fails to converge in max_iter iterations, it 
-%     returns the multilayer partition S with the highest value of the 
-%     normalised modularity Q
+%   - when the algorithm fails to converge in max_iter iterations, it does
+%     two things: it discards the first few iterations (set by the
+%     burn_in parameter and equal to 10 by default); and then it returns 
+%     the multilayer partition S with the highest value of the normalised 
+%     modularity Q from the remaining (max_iter - burn_in) iterations
 % 
 % Dependencies:
-%   - genlouvain.m and iterated_genlouvain.m, which should be in the Matlab path
+%   - genlouvain.m and iterated_genlouvain.m, which should be in the Matlab 
+%     path
 %   - estimate_SBM_parameters.m, optimal_gamma.m, optimal_omega.m,
-%     optimal_beta.m, which need to be in the same directory as this file
+%     optimal_beta.m, which should be in the same directory as this file
 %
 function [gamma, omega, beta, S, Q, converged] = ...
   it_mod_max_temporal(A, gamma0, omega0, beta0, K_max, ...
@@ -93,15 +98,26 @@ function [gamma, omega, beta, S, Q, converged] = ...
   % Convergence settings, change if desired
   tol = 1e-2;     % convergence tolerance
   max_iter = 20;  % maximum number of iterations 
+  
+  % If iteration does not converge, discard first burn_in steps and take
+  % the highest-modularity run from among the rest
+  burn_in = 10;   
+  
+  % Initialise counters
   converged = 0;
   iter = 0;
   
-  fprintf('Initialisation: gamma = %.2f, omega = %.2f\n', ...
-        gamma0, omega0);
-  
   % Same parameters for all layers
   if uniform  
-    Q_best = 0;
+    fprintf('Initialisation: gamma = %.2f, omega = %.2f\n', ...
+        gamma0, omega0);
+      
+    % Initialise arrays for storing partial results
+    gamma_all = zeros(1, max_iter);
+    omega_all = zeros(1, max_iter);
+    Q_all = zeros(1, max_iter);
+    S_all = cell(1, max_iter);
+  
     while ~converged && iter < max_iter
       iter = iter + 1;
       
@@ -129,13 +145,11 @@ function [gamma, omega, beta, S, Q, converged] = ...
       S = reshape(S, N, T);
       Q = Q / twom;
       
-      % Save run if best so far
-      if Q > Q_best
-        Q_best = Q; 
-        S_best = S;
-        gamma_best = gamma;
-        omega_best = omega;
-      end
+      % Save results from current run
+      gamma_all(iter) = gamma;
+      omega_all(iter) = omega;
+      Q_all(iter) = Q;
+      S_all{iter} = S;
       
       % Visualisation of multilayer partition
       if drawflag
@@ -150,6 +164,10 @@ function [gamma, omega, beta, S, Q, converged] = ...
       % Use output to estimate th_in, th_out, p, K
       [th_in, th_out, p, K] = estimate_SBM_parameters(A, S);
 
+      % Display results of current run
+      fprintf('Iteration %d: gamma = %.2f, omega = %.2f, p = %.2f, K = %d\n', ...
+        iter, gamma, omega, p, K);
+      
       % Re-estimate gamma and omega
       if K == 1
         % Increase gamma, decrease omega 
@@ -165,30 +183,37 @@ function [gamma, omega, beta, S, Q, converged] = ...
         omega_new = optimal_omega(p, K, th_in, th_out, omega);
       end
 
-      % Display outputs
-      fprintf('Iteration %d: gamma = %.2f, omega = %.2f, p = %.2f, K = %d\n', ...
-        iter, gamma_new, omega_new, p, K);
-
       % Check for convergence (note higher tolerance for omega!)
       if max(abs(gamma_new / gamma - 1), ...
           abs(omega_new / omega - 1) / 5) < tol
         converged = 1;
+      else
+        gamma = gamma_new; omega = omega_new;
       end
-      
-      gamma = gamma_new; omega = omega_new;
-      
     end
     
-    % Save highest-modularity results if iteration did not converge
+    % Save highest-modularity results (ignoring first burn_in runs) if 
+    % iteration did not converge
     if ~converged
-      S = S_best;
-      Q = Q_best;
-      gamma = gamma_best;
-      omega = omega_best;
+      [~, idx] = max(Q_all(burn_in+1:end));
+      idx = idx + burn_in;
+      S = S_all{idx};
+      Q = Q_all(idx);
+      gamma = gamma_all(idx);
+      omega = omega_all(idx);
     end
       
-    fprintf('\n')
+    % Estimated gamma and omega from final modularity-maximisation run
+    fprintf('Final values: gamma = %.2f, omega = %.2f\n', ...
+      gamma_new, omega_new);
+    
+    fprintf('\nOptimal values: gamma = %.2f, omega = %.2f\n\n', ...
+      gamma, omega);
   else  % layer-dependent parameters 
+    
+    fprintf('Initialisation: gamma = %.2f, omega = %.2f, beta = %.2f\n', ...
+        mean(gamma0), mean(omega0), mean(beta0));
+      
     % Create vectors of appropriate length if scalars are given
     if length(gamma) == 1
       gamma = repmat(gamma, T, 1);
@@ -200,7 +225,12 @@ function [gamma, omega, beta, S, Q, converged] = ...
       beta = repmat(beta, T, 1);
     end
     
-    Q_best = 0;
+    % Initialise arrays for storing partial results
+    gamma_all = zeros(T, max_iter);
+    omega_all = zeros(T - 1, max_iter);
+    beta_all  = zeros(T, max_iter);
+    Q_all = zeros(1, max_iter);
+    S_all = cell(1, max_iter);
     
     while ~converged && iter < max_iter
       iter = iter + 1;
@@ -219,14 +249,12 @@ function [gamma, omega, beta, S, Q, converged] = ...
       S = reshape(S, N, T);
       Q = Q / twom;
       
-      % Save run if best so far
-      if Q > Q_best
-        Q_best = Q; 
-        S_best = S;
-        gamma_best = gamma;
-        omega_best = omega;
-        beta_best = beta;
-      end
+      % Save results from current run
+      gamma_all(:, iter) = gamma;
+      omega_all(:, iter) = omega;
+      beta_all(:, iter)  = beta;
+      Q_all(iter) = Q;
+      S_all{iter} = S;
       
       % Show visualisation of multilayer partition
       if drawflag
@@ -247,32 +275,35 @@ function [gamma, omega, beta, S, Q, converged] = ...
       beta_new = optimal_beta(th_in, th_out);
       
       % Display average parameter values and maximum change
-      fprintf('Iteration %d average values: gamma = %.2f, omega = %.2f, p = %.2f, K = %.1f\n', ...
-        iter, mean(gamma_new), mean(omega_new), mean(p), mean(K));
-      fprintf('..max change: delta(gamma) = %.2f, delta(omega) = %.2f, delta(beta) = %.2f\n', ...
-        max(abs(gamma_new - gamma)), max(abs(omega_new - omega)), max(abs(beta_new - beta)));
-      %fprintf('Gamma:'); gamma_new
-      %fprintf('Omega:'); omega_new
-      %fprintf('Beta:'); beta_new
+      fprintf('Iteration %d mean values: gamma = %.2f, omega = %.2f, beta = %.2f, p = %.2f, K = %.1f\n', ...
+        iter, mean(gamma), mean(omega), mean(beta), mean(p), mean(K));
+      fprintf('..max percent change: delta(gamma) = %.2f, delta(omega) = %.2f, delta(beta) = %.2f\n', ...
+        max(abs(gamma_new ./ gamma - 1)), max(abs(omega_new ./ omega - 1)), ...
+        max(abs(beta_new ./ beta - 1)));
       
       % Check for convergence
       if max(max(max(abs(gamma_new ./ gamma - 1)), ...
           max(abs(omega_new ./ omega - 1)) / 5), ...
           max(abs(beta_new ./ beta - 1)) / 1) < tol
         converged = 1;
+      else
+        gamma = gamma_new; omega = omega_new; beta = beta_new;
       end
-
-      gamma = gamma_new; omega = omega_new; beta = beta_new;
     end
     
-    % Save highest-modularity results if iteration did not converge
+    % Save highest-modularity results (ignoring first burn_in runs) if 
+    % iteration did not converge
     if ~converged
-      S = S_best;
-      Q = Q_best;
-      gamma = gamma_best;
-      omega = omega_best;
+      [~, idx] = max(Q_all(burn_in+1:end));
+      idx = idx + burn_in;
+      S = S_all{idx};
+      Q = Q_all(idx);
+      gamma = gamma_all(:, idx);
+      omega = omega_all(:, idx);
+      beta  = beta_all(:, idx);
     end
-      
-    fprintf('\n');
+    
+    fprintf('\nMean optimal values: gamma = %.2f, omega = %.2f, beta = %.2f\n\n', ...
+      mean(gamma), mean(omega), mean(beta));
   end
 end
